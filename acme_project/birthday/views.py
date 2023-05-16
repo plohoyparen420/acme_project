@@ -10,10 +10,11 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 
 from django.http import HttpResponse, HttpResponseForbidden
 
-from .forms import BirthdayForm
+from .forms import BirthdayForm, CongratulationForm
 # Импортируем из utils.py функцию для подсчёта дней.
 from .utils import calculate_birthday_countdown
 from .models import Birthday
+from .models import Congratulation
 
 @login_required
 def simple_view(request):
@@ -30,6 +31,14 @@ class BirthdayDetailView(DetailView):
             # Дату рождения берём из объекта в словаре context:
             self.object.birthday
         )
+        # Записываем в переменную form пустой объект формы.
+        context['form'] = CongratulationForm()
+        # Запрашиваем все поздравления для выбранного дня рождения.
+        context['congratulations'] = (
+            # Дополнительно подгружаем авторов комментариев,
+            # чтобы избежать множества запросов к БД.
+            self.object.congratulations.select_related('author')
+        ) 
         # Возвращаем словарь контекста.
         return context 
 
@@ -73,12 +82,13 @@ class BirthdayDeleteView(LoginRequiredMixin,DeleteView):
         return super().dispatch(request, *args, **kwargs) 
 # Наследуем класс от встроенного ListView:
 class BirthdayListView(ListView):
-    # Указываем модель, с которой работает CBV...
     model = Birthday
-    # ...сортировку, которая будет применена при выводе списка объектов:
+    # По умолчанию этот класс 
+    # выполняет запрос queryset = Birthday.objects.all(),
+    # но мы его переопределим:
+    queryset = Birthday.objects.prefetch_related('tags').select_related('author')
     ordering = 'id'
-    # ...и даже настройки пагинации:
-    paginate_by = 1
+    paginate_by = 10
 
 @login_required
 def delete_birthday(request, pk):
@@ -159,3 +169,22 @@ def birthday_list(request):
     # объект страницы пагинатора
     context = {'page_obj': page_obj}
     return render(request, 'birthday/birthday_list.html', context) 
+
+# Будут обработаны POST-запросы только от залогиненных пользователей.
+@login_required
+def add_comment(request, pk):
+    # Получаем объект дня рождения или выбрасываем 404 ошибку.
+    birthday = get_object_or_404(Birthday, pk=pk)
+    # Функция должна обрабатывать только POST-запросы.
+    form = CongratulationForm(request.POST)
+    if form.is_valid():
+        # Создаём объект поздравления, но не сохраняем его в БД.
+        congratulation = form.save(commit=False)
+        # В поле author передаём объект автора поздравления.
+        congratulation.author = request.user
+        # В поле birthday передаём объект дня рождения.
+        congratulation.birthday = birthday
+        # Сохраняем объект в БД.
+        congratulation.save()
+    # Перенаправляем пользователя назад, на страницу дня рождения.
+    return redirect('birthday:detail', pk=pk) 
