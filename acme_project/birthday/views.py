@@ -5,11 +5,19 @@ from django.views.generic import (
     CreateView, DeleteView, DetailView, ListView, UpdateView
 )
 from django.urls import reverse_lazy
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+
+from django.http import HttpResponse, HttpResponseForbidden
 
 from .forms import BirthdayForm
 # Импортируем из utils.py функцию для подсчёта дней.
 from .utils import calculate_birthday_countdown
 from .models import Birthday
+
+@login_required
+def simple_view(request):
+    return HttpResponse('Страница для залогиненных пользователей!')
 
 class BirthdayDetailView(DetailView):
     model = Birthday
@@ -25,20 +33,44 @@ class BirthdayDetailView(DetailView):
         # Возвращаем словарь контекста.
         return context 
 
-class BirthdayCreateView(CreateView):
+
+class BirthdayCreateView(LoginRequiredMixin, CreateView):
     model = Birthday
     form_class = BirthdayForm
 
+    def form_valid(self, form):
+        # Присвоить полю author объект пользователя из запроса.
+        form.instance.author = self.request.user
+        # Продолжить валидацию, описанную в форме.
+        return super().form_valid(form) 
 
-class BirthdayUpdateView(UpdateView):
+class BirthdayUpdateView(LoginRequiredMixin,UpdateView):
     model = Birthday
     form_class = BirthdayForm
 
+    def dispatch(self, request, *args, **kwargs):
+        # При получении объекта не указываем автора.
+        # Результат сохраняем в переменную.
+        instance = get_object_or_404(Birthday, pk=kwargs['pk'])
+        # Сверяем автора объекта и пользователя из запроса.
+        if instance.author != request.user:
+            # Здесь может быть как вызов ошибки, так и редирект на нужную страницу.
+            raise HttpResponseForbidden
+        return super().dispatch(request, *args, **kwargs) 
 
-class BirthdayDeleteView(DeleteView):
+class BirthdayDeleteView(LoginRequiredMixin,DeleteView):
     model = Birthday
     success_url = reverse_lazy('birthday:list')
 
+    def dispatch(self, request, *args, **kwargs):
+        # При получении объекта не указываем автора.
+        # Результат сохраняем в переменную.
+        instance = get_object_or_404(Birthday, pk=kwargs['pk'])
+        # Сверяем автора объекта и пользователя из запроса.
+        if instance.author != request.user:
+            # Здесь может быть как вызов ошибки, так и редирект на нужную страницу.
+            raise HttpResponseForbidden
+        return super().dispatch(request, *args, **kwargs) 
 # Наследуем класс от встроенного ListView:
 class BirthdayListView(ListView):
     # Указываем модель, с которой работает CBV...
@@ -48,6 +80,7 @@ class BirthdayListView(ListView):
     # ...и даже настройки пагинации:
     paginate_by = 1
 
+@login_required
 def delete_birthday(request, pk):
     # Получаем объект модели или выбрасываем 404 ошибку.
     instance = get_object_or_404(Birthday, pk=pk)
@@ -83,6 +116,7 @@ def edit_birthday(request, pk):
 
 
 # Добавим опциональный параметр pk.
+@login_required
 def birthday(request, pk=None):
     # Если в запросе указан pk (если получен запрос на редактирование объекта):
     if pk is not None:
